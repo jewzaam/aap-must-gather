@@ -21,6 +21,11 @@ if [[ -z "$NAMESPACE" && -n "$1" ]]; then
   NAMESPACE="$1"
 fi
 
+if ! $COLLECT_AAP && ! $COLLECT_AO; then
+  echo "Error: --aap-only and --ao-only are mutually exclusive" >&2
+  exit 1
+fi
+
 BASE_COLLECTION_PATH="/must-gather"
 mkdir -p ${BASE_COLLECTION_PATH}
 
