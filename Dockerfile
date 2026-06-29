@@ -15,4 +15,6 @@ COPY --from=builder /usr/bin/oc /usr/bin/oc
 # copy all collection scripts to /usr/bin
 COPY collection-scripts/* /usr/bin/
 
-ENTRYPOINT /usr/bin/gather
+USER 1001
+
+CMD ["/usr/bin/gather"]

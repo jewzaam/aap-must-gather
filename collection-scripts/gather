@@ -1,9 +1,35 @@
 #!/bin/bash
 
+COLLECT_AAP=true
+COLLECT_AO=true
+NAMESPACE=""
+
+OPTS=$(getopt -o 'n:' -l aap-only,ao-only,namespace:,all-namespaces -n 'gather' -- "$@") || exit 1
+eval set -- "$OPTS"
+
+while true; do
+  case "$1" in
+    --aap-only)       COLLECT_AO=false; shift ;;
+    --ao-only)        COLLECT_AAP=false; shift ;;
+    -n|--namespace)   NAMESPACE="$2"; shift 2 ;;
+    --all-namespaces) shift ;;
+    --)               shift; break ;;
+  esac
+done
+
+if [[ -z "$NAMESPACE" && -n "$1" ]]; then
+  NAMESPACE="$1"
+fi
+
+if ! $COLLECT_AAP && ! $COLLECT_AO; then
+  echo "Error: --aap-only and --ao-only are mutually exclusive" >&2
+  exit 1
+fi
+
 BASE_COLLECTION_PATH="/must-gather"
 mkdir -p ${BASE_COLLECTION_PATH}
 
-ANSIBLECRD="automationcontrollerbackups.automationcontroller.ansible.com \
+AAP_CRD="automationcontrollerbackups.automationcontroller.ansible.com \
   automationcontrollerrestores.automationcontroller.ansible.com \
   automationcontrollers.automationcontroller.ansible.com \
   automationcontrollermeshingresses.automationcontroller.ansible.com \
@@ -31,28 +57,55 @@ ANSIBLECRD="automationcontrollerbackups.automationcontroller.ansible.com \
   metricsservicebackups.automationmetricsservice.ansible.com \
   metricsservicerestores.automationmetricsservice.ansible.com"
 
-oc adm inspect customresourcedefinition.apiextensions.k8s.io $ANSIBLECRD --dest-dir=must-gather
+AO_CRD="automationorchestrators.aap.ansible.com"
+
+CRDS_TO_COLLECT="$AAP_CRD $AO_CRD"
+RESOURCES="AAP + AutomationOrchestrator"
+if ! $COLLECT_AAP; then
+  CRDS_TO_COLLECT="$AO_CRD"
+  RESOURCES="AutomationOrchestrator only"
+elif ! $COLLECT_AO; then
+  CRDS_TO_COLLECT="$AAP_CRD"
+  RESOURCES="AAP only"
+fi
+
+if [[ -n "$NAMESPACE" ]]; then
+  echo "Collecting $RESOURCES resources in namespace $NAMESPACE"
+else
+  echo "Collecting $RESOURCES resources across all namespaces"
+fi
+
+oc adm inspect customresourcedefinition.apiextensions.k8s.io $CRDS_TO_COLLECT --dest-dir=must-gather
 oc adm inspect customresourcedefinition.apiextensions.k8s.io subscriptions.operators.coreos.com clusterserviceversions.operators.coreos.com --dest-dir=must-gather
 
-for i in $ANSIBLECRD; do
-   oc adm inspect $i --all-namespaces --dest-dir=must-gather 
-   ANSIBLENS+=`oc get $i --all-namespaces --no-headers=true -o custom-columns=NAMESPACE:.metadata.namespace; echo " "`
-done
+if [[ -n "$NAMESPACE" ]]; then
+  for i in $CRDS_TO_COLLECT; do
+    oc adm inspect $i -n $NAMESPACE --dest-dir=must-gather
+  done
 
-NS=`echo ${ANSIBLENS[@]} | xargs -n1 | sort -u`
+  oc adm inspect ns/"$NAMESPACE"  --dest-dir=must-gather
+  oc get pods -n $NAMESPACE >> ${BASE_COLLECTION_PATH}/gather-aap.log
+else
+  for i in $CRDS_TO_COLLECT; do
+     oc adm inspect $i --all-namespaces --dest-dir=must-gather
+     ANSIBLENS+=`oc get $i --all-namespaces --no-headers=true -o custom-columns=NAMESPACE:.metadata.namespace; echo " "`
+  done
 
-for a in $NS; do
-  oc adm inspect ns/"$a"  --dest-dir=must-gather
-  oc adm inspect -n $a csv --dest-dir=must-gather
-  oc get pods -n $a >> ${BASE_COLLECTION_PATH}/gather-aap.log
-done
+  NS=`echo ${ANSIBLENS[@]} | xargs -n1 | sort -u`
 
-for b in $(oc get -A subs --field-selector='metadata.name=ansible-automation-platform-operator' -o custom-columns=NAMESPACE:.metadata.namespace); do
-  oc adm inspect ns/"$b" --dest-dir=must-gather
-  oc get pods -n $b >> ${BASE_COLLECTION_PATH}/gather-aap.log
-  oc adm inspect -n $b subs --dest-dir=must-gather
-done
+  for a in $NS; do
+    oc adm inspect ns/"$a"  --dest-dir=must-gather
+    oc adm inspect -n $a csv --dest-dir=must-gather
+    oc get pods -n $a >> ${BASE_COLLECTION_PATH}/gather-aap.log
+  done
 
-echo "WARNING: Collecting kernel messages on ALL nodes in your cluster. This could take a large amount of time."
-oc adm node-logs --role=master -l kubernetes.io/os=linux --grep kernel > "${BASE_COLLECTION_PATH}/master_dmesg.log"
-oc adm node-logs --role=worker -l kubernetes.io/os=linux --grep kernel > "${BASE_COLLECTION_PATH}/worker_dmesg.log"
+  for b in $(oc get -A subs --field-selector='metadata.name=ansible-automation-platform-operator' -o custom-columns=NAMESPACE:.metadata.namespace); do
+    oc adm inspect ns/"$b" --dest-dir=must-gather
+    oc get pods -n $b >> ${BASE_COLLECTION_PATH}/gather-aap.log
+    oc adm inspect -n $b subs --dest-dir=must-gather
+  done
+
+  echo "WARNING: Collecting kernel messages on ALL nodes in your cluster. This could take a large amount of time."
+  oc adm node-logs --role=master -l kubernetes.io/os=linux --grep kernel > "${BASE_COLLECTION_PATH}/master_dmesg.log"
+  oc adm node-logs --role=worker -l kubernetes.io/os=linux --grep kernel > "${BASE_COLLECTION_PATH}/worker_dmesg.log"
+fi
