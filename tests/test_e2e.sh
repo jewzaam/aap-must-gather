@@ -107,7 +107,7 @@ assert_contains "$out" "mutually exclusive"
 rm -f "$out"
 
 # Positional namespace arg (backward compat with ns-gather)
-out=$(run_scenario "gather <positional namespace>" /usr/bin/gather default)
+out=$(run_scenario "ns-gather <positional namespace>" /usr/bin/ns-gather default)
 assert_contains "$out" "in namespace default"
 assert_not_contains "$out" "across all namespaces"
 rm -f "$out"
