@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CLUSTER_NAME="aap-must-gather-e2e"
-IMAGE="quay.io/goneri/aap-must-gather:latest"
+IMAGE="${IMAGE:-localhost/aap-must-gather:e2e}"
 IMAGE_TAR="aap-must-gather.tar"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 FAILURES=0
